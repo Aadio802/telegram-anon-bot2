@@ -12,11 +12,10 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 import aiosqlite
-rating_targets = {}
-
 searching = set()
 waiting = set()
 chat_pairs = {}
+rating_targets = {}
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
@@ -48,16 +47,21 @@ async def find(message: types.Message):
 async def stop_chat(message: types.Message):
     uid = message.from_user.id
 
-    if uid in chat_pairs:
-        partner = chat_pairs[uid]
-        del chat_pairs[partner]
-        del chat_pairs[uid]
+    if uid in pairs:
+        partner = pairs[uid]
+        del pairs[partner]
+        del pairs[uid]
         await bot.send_message(partner, "Your partner disconnected.")
 
-    if uid in waiting:
-        waiting.remove(uid)
+        # Set up rating targets so each knows who to rate
+        rating_targets[partner] = uid
+        rating_targets[uid] = partner
 
-    await message.answer("Chat stopped. Use /find to search again.")
+        await bot.send_message(partner, "Rate your partner: /rate <1–5>")
+        await message.answer("Rate your partner: /rate <1–5>")
+        return
+
+  await message.answer("You were not chatting. Use /find to start.")
 
 @dp.message(Command("next"))
 async def next_chat(message: types.Message):
@@ -95,6 +99,34 @@ async def next_chat(message: types.Message):
     waiting.add(uid)
     await message.answer("Searching for a new stranger...")
 
+@dp.message(lambda m: m.text and m.text.startswith("/rate "))
+async def rate_handler(message: types.Message):
+    parts = message.text.split(" ", 1)
+    if len(parts) != 2:
+        await message.answer("Usage: /rate <1–5>")
+        return
+
+    try:
+        score = int(parts[1])
+    except ValueError:
+        await message.answer("Please enter a number from 1 to 5.")
+        return
+
+    if score < 1 or score > 5:
+        await message.answer("Rating must be between 1 and 5.")
+        return
+
+    uid = message.from_user.id
+
+    if uid not in rating_targets:
+        await message.answer("You have no one to rate right now.")
+        return
+
+    # Save and clear
+    target = rating_targets.pop(uid)
+    await save_rating(target, score)
+    await message.answer(f"Thanks! You rated your partner {score}⭐")
+
 @dp.message()
 async def relay(message: types.Message):
     uid = message.from_user.id
@@ -105,7 +137,9 @@ async def relay(message: types.Message):
     else:
         await message.answer("Use /find to start chatting.")
 
+from database import init_db
 async def main():
+    await init_db()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
