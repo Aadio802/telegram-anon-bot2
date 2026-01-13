@@ -11,6 +11,9 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+import aiosqlite
+rating_targets = {}
+
 searching = set()
 waiting = set()
 chat_pairs = {}
