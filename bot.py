@@ -1,27 +1,26 @@
 import os
 import asyncio
+import re
 import aiosqlite
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+
+from config import BOT_TOKEN
 from database import init_db
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not found. Add it in Railway Variables.")
-
-bot = Bot(token=BOT_TOKEN)
+# Bot setup
+bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
 waiting = set()
 pairs = {}
 rating_targets = {}
 
-# ---------- Helper to save rating ----------
+# --- Helpers ---
+
 async def save_rating(target, score):
-    async with aiosqlite.connect("users.db") as db:
-        # ensure user exists
-        await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (target,))
-        # update rating
+    async with aiosqlite.connect("botdata.db") as db:
+        await db.execute("INSERT OR IGNORE INTO users(user_id) VALUES (?)", (target,))
         await db.execute("""
             UPDATE users
             SET rating_sum = rating_sum + ?, rating_count = rating_count + 1
@@ -29,161 +28,201 @@ async def save_rating(target, score):
         """, (score, target))
         await db.commit()
 
-# ---------- /start ----------
+async def user_is_banned(uid):
+    async with aiosqlite.connect("botdata.db") as db:
+        async with db.execute("SELECT is_banned FROM users WHERE user_id=?", (uid,)) as cur:
+            row = await cur.fetchone()
+    return bool(row and row[0] == 1)
+
+async def add_user_if_not_exists(uid):
+    async with aiosqlite.connect("botdata.db") as db:
+        await db.execute("INSERT OR IGNORE INTO users(user_id) VALUES (?)", (uid,))
+        await db.commit()
+
+# --- Core Commands ---
+
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
-    await message.answer(
-        "Welcome! 👋\nUse /find to connect with a stranger."
-    )
+    await add_user_if_not_exists(message.from_user.id)
+    await message.answer("Welcome! Use /find to connect with a stranger.")
 
-# ---------- /find ----------
 @dp.message(Command("find"))
 async def find_handler(message: types.Message):
     uid = message.from_user.id
+    if await user_is_banned(uid):
+        await message.answer("🚫 You are banned.")
+        return
 
-    # already in a chat?
     if uid in pairs:
-        await message.answer("You are already chatting. Use /next or /stop.")
+        await message.answer("You are already chatting.")
         return
 
-    # already searching?
     if uid in waiting:
-        await message.answer("You're already searching. Please wait!")
+        await message.answer("You are already searching.")
         return
 
-    # try to match
     for other in list(waiting):
         if other != uid:
             waiting.remove(other)
             pairs[uid] = other
             pairs[other] = uid
-            await bot.send_message(other, "🔗 Connected to a stranger!")
-            await message.answer("🔗 Connected to a stranger!")
+            await bot.send_message(other, "Connected!")
+            await message.answer("Connected!")
             return
 
-    # no partner yet, add to waiting
     waiting.add(uid)
-    await message.answer("🔍 Searching for a partner...")
+    await message.answer("Searching...")
 
-# ---------- /next ----------
 @dp.message(Command("next"))
 async def next_handler(message: types.Message):
     uid = message.from_user.id
-
-    # If user was chatting, disconnect
     if uid in pairs:
         partner = pairs[uid]
         del pairs[partner]
         del pairs[uid]
-        await bot.send_message(partner, "Your partner left the chat.")
+        await bot.send_message(partner, "Partner left.")
+        waiting.add(partner)
 
-        # put partner back into waiting
-        if partner not in waiting:
-            waiting.add(partner)
-
-    # If already searching
     if uid in waiting:
-        await message.answer("You're already searching. Please wait!")
+        await message.answer("Already searching.")
         return
 
-    # try match again
     for other in list(waiting):
         if other != uid:
             waiting.remove(other)
             pairs[uid] = other
             pairs[other] = uid
-            await bot.send_message(other, "🔗 Connected to a stranger!")
-            await message.answer("🔗 Connected to a stranger!")
+            await bot.send_message(other, "Connected!")
+            await message.answer("Connected!")
             return
 
-    # no partner yet
     waiting.add(uid)
-    await message.answer("🔍 Searching for a partner...")
+    await message.answer("Searching...")
 
-# ---------- /stop (disconnect + ask for rating) ----------
 @dp.message(Command("stop"))
 async def stop_handler(message: types.Message):
     uid = message.from_user.id
-
-    # if chatting, end chat
     if uid in pairs:
         partner = pairs[uid]
         del pairs[partner]
         del pairs[uid]
-
-        await bot.send_message(partner, "Your partner disconnected.")
-        
-        # request ratings
+        await bot.send_message(partner, "Partner disconnected.")
         rating_targets[partner] = uid
         rating_targets[uid] = partner
-        
-        await bot.send_message(partner, "Rate your partner: /rate <1–5>")
-        await message.answer("Rate your partner: /rate <1–5>")
+        await bot.send_message(partner, "Rate partner: /rate 1-5")
+        await message.answer("Rate partner: /rate 1-5")
         return
 
-    # if waiting but not chatting
     if uid in waiting:
         waiting.remove(uid)
         await message.answer("Stopped searching.")
         return
 
-    # idle
-    await message.answer("You’re not in a conversation right now.")
+    await message.answer("Not in a conversation.")
 
-# ---------- /rate (save a rating) ----------
 @dp.message(lambda m: m.text and m.text.startswith("/rate "))
 async def rate_handler(message: types.Message):
-    parts = message.text.split(" ", 1)
+    parts = message.text.split()
     if len(parts) != 2:
-        await message.answer("Usage: /rate <1–5>")
+        await message.answer("Usage: /rate <1-5>")
         return
-
     try:
         score = int(parts[1])
-    except ValueError:
-        await message.answer("Please enter a number from 1 to 5.")
+    except:
+        await message.answer("Invalid number.")
         return
-
     if score < 1 or score > 5:
-        await message.answer("Rating must be between 1 and 5.")
+        await message.answer("Number must be 1-5.")
         return
 
     uid = message.from_user.id
-
     if uid not in rating_targets:
-        await message.answer("You have no one to rate right now.")
+        await message.answer("Nothing to rate.")
         return
 
     target = rating_targets.pop(uid)
     await save_rating(target, score)
-    await message.answer(f"Thanks! You rated your partner {score}⭐")
+    await message.answer(f"Thanks for rating {score}⭐")
 
-# ---------- /myrating (view your rating) ----------
 @dp.message(Command("myrating"))
 async def my_rating(message: types.Message):
     uid = message.from_user.id
-    async with aiosqlite.connect("users.db") as db:
-        async with db.execute(
-            "SELECT rating_sum, rating_count FROM users WHERE user_id=?", (uid,)
-        ) as cur:
+    async with aiosqlite.connect("botdata.db") as db:
+        async with db.execute("SELECT rating_sum, rating_count FROM users WHERE user_id=?", (uid,)) as cur:
             row = await cur.fetchone()
-
-    if not row or row[1] < 1:
+    if not row or row[1] == 0:
         await message.answer("No ratings yet.")
     else:
-        avg = row[0] / row[1]
-        await message.answer(
-            f"⭐ Your rating: {avg:.2f} based on {row[1]} rating(s)."
-        )
+        avg = row[0]/row[1]
+        await message.answer(f"⭐ Your rating: {avg:.2f} based on {row[1]} ratings.")
 
-# ---------- relay other messages ----------
-@dp.message()
-async def relay_handler(message: types.Message):
+# --- Admin Panel ---
+
+@dp.message(Command("admin"))
+async def admin_panel(message: types.Message):
     uid = message.from_user.id
-    if uid in pairs:
+    # Only you (owner) can see admin tools — replace 123 with your Telegram ID
+    if uid != 123456789:
+        await message.answer("Unauthorized.")
+        return
+    await message.answer("Admin: /ban <id>, /unban <id>, /stats")
+
+@dp.message(Command("ban"))
+async def ban_user(message: types.Message):
+    parts = message.text.split()
+    if len(parts) != 2:
+        await message.answer("Usage: /ban <user_id>")
+        return
+    target = int(parts[1])
+    async with aiosqlite.connect("botdata.db") as db:
+        await db.execute("UPDATE users SET is_banned=1 WHERE user_id=?", (target,))
+        await db.commit()
+    await message.answer(f"Banned {target}")
+
+@dp.message(Command("unban"))
+async def unban_user(message: types.Message):
+    parts = message.text.split()
+    if len(parts) != 2:
+        await message.answer("Usage: /unban <user_id>")
+        return
+    target = int(parts[1])
+    async with aiosqlite.connect("botdata.db") as db:
+        await db.execute("UPDATE users SET is_banned=0 WHERE user_id=?", (target,))
+        await db.commit()
+    await message.answer(f"Unbanned {target}")
+
+@dp.message(Command("stats"))
+async def stats(message: types.Message):
+    async with aiosqlite.connect("botdata.db") as db:
+        async with db.execute("SELECT COUNT(*) FROM users") as cur:
+            total = await cur.fetchone()
+    await message.answer(f"Total users: {total[0]}")
+
+# --- Relay system ---
+
+@dp.message()
+async def relay(message: types.Message):
+    uid = message.from_user.id
+    if uid in pairs and message.text:
+        # Check free user link block
+        if "http" in message.text.lower():
+            async with aiosqlite.connect("botdata.db") as db:
+                async with db.execute("SELECT is_premium FROM users WHERE user_id=?", (uid,)) as cur:
+                    is_p = await cur.fetchone()
+            if not is_p or is_p[0] == 0:
+                await message.answer("Links are for premium users.")
+                return
+
         await bot.send_message(pairs[uid], message.text)
 
-# ---------- start polling (with DB init) ----------
+# --- Premium Buy Prompt ---
+
+@dp.message(Command("premium"))
+async def premium(message: types.Message):
+    await message.answer("To unlock premium features like sending LINKS and high-rating filter, send Stars to this bot.")
+
+# --- Start Polling ---
+
 async def main():
     await init_db()
     await dp.start_polling(bot)
