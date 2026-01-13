@@ -25,79 +25,105 @@ async def start(message: types.Message):
 async def find(message: types.Message):
     uid = message.from_user.id
 
-    if uid in chat_pairs:
-        await message.answer("You are already chatting.")
+    # If user already chatting
+    if uid in pairs:
+        await message.answer("You are already chatting. Use /next or /stop.")
         return
 
+    # If user is already in waiting
     if uid in waiting:
-        await message.answer("Already searching...")
+        await message.answer("You're already searching. Please wait...")
         return
 
-    if waiting:
-        partner = waiting.pop()
-        chat_pairs[uid] = partner
-        chat_pairs[partner] = uid
-        await bot.send_message(partner, "Connected to a stranger!")
-        await message.answer("Connected to a stranger!")
-    else:
-        waiting.add(uid)
-        await message.answer("Searching...")
+    # Try to match with anyone in waiting pool
+    # Make a list copy to avoid modifying while iterating
+    for other in list(waiting):
+        if other != uid:
+            # found someone
+            waiting.remove(other)
+
+            pairs[uid] = other
+            pairs[other] = uid
+
+            await bot.send_message(other, "🔗 Connected to a stranger!")
+            await message.answer("🔗 Connected to a stranger!")
+            return
+
+    # Otherwise put this user into waiting pool
+    waiting.add(uid)
+    await message.answer("🔍 Searching for a partner...")
 
 @dp.message(Command("stop"))
 async def stop_chat(message: types.Message):
     uid = message.from_user.id
 
+    # If user is currently in a chat
     if uid in pairs:
         partner = pairs[uid]
+
+        # Remove both sides of the chat
         del pairs[partner]
         del pairs[uid]
+
+        # Tell the partner
         await bot.send_message(partner, "Your partner disconnected.")
 
-        # Set up rating targets so each knows who to rate
+        # Set up rating targets
         rating_targets[partner] = uid
         rating_targets[uid] = partner
 
-        await bot.send_message(partner, "Rate your partner: /rate <1–5>")
-        await message.answer("Rate your partner: /rate <1–5>")
+        # Ask both to rate each other
+        await bot.send_message(partner, "Rate your partner: /rate 1–5")
+        await message.answer("Rate your partner: /rate 1–5")
         return
 
-        await message.answer("You were not chatting. Use /find to start.")
+    # If user was searching for a match but not in a chat
+    if uid in waiting:
+        waiting.remove(uid)
+        await message.answer("Stopped searching. Use /find to search again.")
+        return
+
+    # Otherwise user not in chat or searching
+    await message.answer("You are not in a chat. Use /find to start.")
 
 @dp.message(Command("next"))
 async def next_chat(message: types.Message):
     uid = message.from_user.id
 
-    # If user is already in waiting (searching)
-    if uid in waiting and uid not in chat_pairs:
-        await message.answer("You're already searching for someone. Please wait...")
-        return
+    # If user is currently in a chat
+    if uid in pairs:
+        partner = pairs[uid]
 
-    # If user is in a chat, disconnect both sides
-    if uid in chat_pairs:
-        partner = chat_pairs[uid]
+        # remove chat
+        del pairs[partner]
+        del pairs[uid]
 
-        # Remove both from chat pairs
-        del chat_pairs[partner]
-        del chat_pairs[uid]
+        await bot.send_message(partner, "Your partner left the chat.")
 
-        # Tell the partner what happened
-        await bot.send_message(partner, "Your partner left the chat and is searching again...")
-        
-        # Put partner back into waiting if not already
+        # add partner back to waiting if not already in
         if partner not in waiting:
             waiting.add(partner)
 
-        # Tell this user they're starting a new search
-        await message.answer("Searching for a new stranger...")
-
-        # Put the user back into waiting for a new match
-        waiting.add(uid)
+    # If user already searching
+    if uid in waiting:
+        await message.answer("You're already searching. Please wait...")
         return
 
-    # Otherwise user is not chatting and not searching yet
-    # Put them into waiting
+    # Try matching immediately
+    for other in list(waiting):
+        if other != uid:
+            waiting.remove(other)
+
+            pairs[uid] = other
+            pairs[other] = uid
+
+            await bot.send_message(other, "🔗 Connected to a stranger!")
+            await message.answer("🔗 Connected to a stranger!")
+            return
+
+    # Otherwise put user in waiting
     waiting.add(uid)
-    await message.answer("Searching for a new stranger...")
+    await message.answer("🔍 Searching for a partner...")
 
 @dp.message(lambda m: m.text and m.text.startswith("/rate "))
 async def rate_handler(message: types.Message):
