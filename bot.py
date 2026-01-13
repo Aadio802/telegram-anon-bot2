@@ -130,7 +130,6 @@ async def rate_handler(message: types.Message):
 @dp.message()
 async def relay(message: types.Message):
     uid = message.from_user.id
-
     if uid in pairs:
         partner = pairs[uid]
         await bot.send_message(partner, message.text)
