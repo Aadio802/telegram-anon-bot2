@@ -60,21 +60,40 @@ async def stop_chat(message: types.Message):
 async def next_chat(message: types.Message):
     uid = message.from_user.id
 
+    # If user is currently chatting, disconnect properly
     if uid in chat_pairs:
-        partner = chat_pairs[uid]
+        partner = chat_pairs.pop(uid)
+        chat_pairs.pop(partner, None)
 
-        del chat_pairs[partner]
-        del chat_pairs[uid]
+        await bot.send_message(partner, "Your partner left the chat — you will be rematched soon.")
 
-        await bot.send_message(partner, "Your partner left. Finding a new one...")
+        # Now put the partner back into waiting
+        waiting.add(partner)
 
-        if partner not in waiting:
-            waiting.add(partner)
+    # Also remove the caller from waiting if they were there
+    waiting.discard(uid)
 
-    if uid not in waiting:
-        waiting.add(uid)
+    # Now put the caller into waiting
+    waiting.add(uid)
 
-    await message.answer("Searching for a new stranger...")
+    # Now attempt to match WHILE handling waiting logic same as /find
+    if len(waiting) >= 2:
+        # get any other user
+        others = list(waiting - {uid})
+        if len(others) > 0:
+            match_partner = others[0]
+            waiting.discard(uid)
+            waiting.discard(match_partner)
+
+            chat_pairs[uid] = match_partner
+            chat_pairs[match_partner] = uid
+
+            await message.answer("🔗 Connected to a new stranger!")
+            await bot.send_message(match_partner, "🔗 Connected to a new stranger!")
+            return
+
+    # If no match yet
+    await message.answer("🔍 Searching for a new stranger...")
 
 @dp.message()
 async def relay(message: types.Message):
