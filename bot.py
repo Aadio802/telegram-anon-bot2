@@ -37,6 +37,32 @@ async def find(message: types.Message):
         queue.append(user_id)
         await message.answer("Searching for a partner...")
 
+@dp.message(Command("stop"))
+async def stop(message: types.Message):
+    uid = message.from_user.id
+
+    if uid in pairs:
+        partner = pairs[uid]
+        del pairs[partner]
+        del pairs[uid]
+
+        await bot.send_message(partner, "Your partner left the chat.")
+        await message.answer("You left the chat.")
+    else:
+        await message.answer("You are not in a chat.")
+
+@dp.message(Command("next"))
+async def next_chat(message: types.Message):
+    uid = message.from_user.id
+
+    if uid in pairs:
+        partner = pairs[uid]
+        del pairs[partner]
+        del pairs[uid]
+        await bot.send_message(partner, "Your partner left. Finding a new one...")
+
+    await find(message)
+
 @dp.message()
 async def relay(message: types.Message):
     uid = message.from_user.id
