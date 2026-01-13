@@ -61,7 +61,7 @@ async def stop_chat(message: types.Message):
         await message.answer("Rate your partner: /rate <1–5>")
         return
 
-  await message.answer("You were not chatting. Use /find to start.")
+        await message.answer("You were not chatting. Use /find to start.")
 
 @dp.message(Command("next"))
 async def next_chat(message: types.Message):
