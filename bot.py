@@ -11,8 +11,9 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+searching = set()
 waiting = set()
-pairs = {}
+chat_pairs = {}
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
