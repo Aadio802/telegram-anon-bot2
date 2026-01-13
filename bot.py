@@ -31,7 +31,10 @@ async def find(message: types.Message):
         pairs[user_id] = partner
         pairs[partner] = user_id
 
-        await bot.send_message(partner, "Connected to a stranger!")
+        await bot.send_message(partner, "Partner found 😺
+
+/next — find a new partner
+/stop — stop this chat ")
         await message.answer("Connected to a stranger!")
     else:
         queue.append(user_id)
@@ -47,7 +50,7 @@ async def stop(message: types.Message):
         del pairs[uid]
 
         await bot.send_message(partner, "Your partner left the chat.")
-        await message.answer("You left the chat.")
+        await message.answer("You stopped the chat. Searching for a new partner....")
     else:
         await message.answer("You are not in a chat.")
 
