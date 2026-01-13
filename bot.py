@@ -27,57 +27,54 @@ async def find(message: types.Message):
         await message.answer("You are already chatting.")
         return
 
-    if searching:
-        partner = searching.pop()
+    if uid in waiting:
+        await message.answer("Already searching...")
+        return
+
+    if waiting:
+        partner = waiting.pop()
         chat_pairs[uid] = partner
         chat_pairs[partner] = uid
-
         await bot.send_message(partner, "Connected to a stranger!")
         await message.answer("Connected to a stranger!")
     else:
-        searching.add(uid)
-        await message.answer("Searching for someone...")
+        waiting.add(uid)
+        await message.answer("Searching...")
 
 @dp.message(Command("stop"))
-async def stop(message: types.Message):
+async def stop_chat(message: types.Message):
     uid = message.from_user.id
 
-    if uid in pairs:
-        partner = pairs[uid]
-        del pairs[partner]
-        del pairs[uid]
+    if uid in chat_pairs:
+        partner = chat_pairs[uid]
+        del chat_pairs[partner]
+        del chat_pairs[uid]
+        await bot.send_message(partner, "Your partner disconnected.")
 
-        await bot.send_message(partner, "Your partner left the chat.")
-        await message.answer("You stopped the chat. Searching for a new partner....")
-    else:
-        await message.answer("You are not in a chat.")
+    if uid in waiting:
+        waiting.remove(uid)
+
+    await message.answer("Chat stopped. Use /find to search again.")
 
 @dp.message(Command("next"))
 async def next_chat(message: types.Message):
     uid = message.from_user.id
 
-    # If chatting, disconnect
-    if uid in pairs:
-        partner = pairs.pop(uid)
-        pairs.pop(partner)
+    if uid in chat_pairs:
+        partner = chat_pairs[uid]
 
-        await bot.send_message(partner, "Stranger skipped you.")
-        waiting.add(partner)
+        del chat_pairs[partner]
+        del chat_pairs[uid]
 
-    # Remove user from waiting if already there
-    waiting.discard(uid)
+        await bot.send_message(partner, "Your partner left. Finding a new one...")
 
-    # Try to match again
-    if waiting:
-        partner = waiting.pop()
-        pairs[uid] = partner
-        pairs[partner] = uid
+        if partner not in waiting:
+            waiting.add(partner)
 
-        await message.answer("Connected to a new stranger!")
-        await bot.send_message(partner, "Connected to a new stranger!")
-    else:
+    if uid not in waiting:
         waiting.add(uid)
-        await message.answer("Searching for a new stranger...")
+
+    await message.answer("Searching for a new stranger...")
 
 @dp.message()
 async def relay(message: types.Message):
