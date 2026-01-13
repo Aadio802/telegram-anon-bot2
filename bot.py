@@ -11,8 +11,8 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-queue = []
-pairs = {}
+searching = set()
+chat_pairs = {}
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
@@ -20,7 +20,24 @@ async def start(message: types.Message):
 
 @dp.message(Command("find"))
 async def find(message: types.Message):
-    user_id = message.from_user.id
+    uid = message.from_user.id
+
+    if uid in chat_pairs:
+        await message.answer("You're already chatting. Use /next or /stop.")
+        return
+
+    for other in searching:
+        if other != uid:
+            searching.remove(other)
+            chat_pairs[uid] = other
+            chat_pairs[other] = uid
+
+            await bot.send_message(other, "🔗 Connected to a stranger!")
+            await message.answer("🔗 Connected to a stranger!")
+            return
+
+    searching.add(uid)
+    await message.answer("🔍 Searching for a stranger...")
 
     if user_id in pairs:
         await message.answer("You are already chatting.")
