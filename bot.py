@@ -31,10 +31,7 @@ async def find(message: types.Message):
         pairs[user_id] = partner
         pairs[partner] = user_id
 
-        await bot.send_message(partner, "Partner found 😺
-
-/next — find a new partner
-/stop — stop this chat ")
+        await bot.send_message(partner, "Partner found 😺 /next — find a new partner /stop — stop this chat")
         await message.answer("Connected to a stranger!")
     else:
         queue.append(user_id)
